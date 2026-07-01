@@ -1,4 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { PersonalityEngine } from '../../../lib/engines/personalityEngine';
+import { TopicEngine } from '../../../lib/engines/topicEngine';
+import { MemoryEngine } from '../../../lib/engines/memoryEngine';
+import { ConversationEngine } from '../../../lib/engines/conversationEngine';
+import { PromptEngine } from '../../../lib/engines/promptEngine';
+
+function sanitizeResponse(text: string): string {
+  let cleaned = text.trim().replace(/^["']|["']$/g, '').trim();
+
+  // Define case-insensitive list of forbidden opening patterns/cliches
+  const forbiddenPatterns = [
+    /^(no\s+arguments?\s+yet|no\s+previous\s+arguments?\s+by\s+opponent\.?)/i,
+    /^(let's\s+start|let's\s+kick\s+off|let's\s+see|let's\s+see\s+if)/i,
+    /^(can\s+they\s+keep\s+up\??|what's\s+their\s+strategy\??)/i,
+    /^(i\s+mean|in\s+conclusion|silence\s+is\s+golden|as\s+an?\s+ai)/i,
+    /^(lacking\s+previous\s+arguments?)/i
+  ];
+
+  let stripped = true;
+  while (stripped) {
+    stripped = false;
+    for (const regex of forbiddenPatterns) {
+      if (regex.test(cleaned)) {
+        cleaned = cleaned.replace(regex, '').trim();
+        // Remove leading punctuation and spaces
+        cleaned = cleaned.replace(/^[:,\-\s\.]+/g, '').trim();
+        stripped = true;
+      }
+    }
+  }
+
+  // Split into sentences using lookbehind for punctuation
+  const sentences = cleaned.split(/(?<=[.!?])\s+/).filter(Boolean);
+  
+  // Enforce max 2 sentences
+  const keptSentences = sentences.slice(0, 2);
+  cleaned = keptSentences.join(' ');
+
+  // Final trim and capitalization check
+  cleaned = cleaned.trim().replace(/^["']|["']$/g, '').trim();
+  if (cleaned.length > 0) {
+    cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  }
+
+  return cleaned;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,26 +55,44 @@ export async function POST(req: NextRequest) {
       sideB,
       neutralStance,
       speaker,
-      history = []
+      history = [],
+      selectedIds = [],
+      personaSides = {}
     } = body;
 
     // Validate inputs
-    if (!topic || !speaker) {
+    if (!topic || !speaker || !speaker.id) {
       return NextResponse.json(
-        { error: 'Missing required parameters: topic or speaker.' },
+        { error: 'Missing required parameters: topic, speaker, or speaker.id.' },
         { status: 400 }
       );
     }
 
-    // Use only the server-side environment variable API key
-    const apiKey = process.env.GEMINI_API_KEY;
-
+    const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'API_KEY_MISSING', message: 'No Gemini API key configured on the server. Set GEMINI_API_KEY in your .env.local file.' },
+        { error: 'API_KEY_MISSING', message: 'No Groq API key configured on the server. Set GROQ_API_KEY in your .env.local file.' },
         { status: 400 }
       );
     }
+
+    const modelName = process.env.GROQ_MODEL?.trim() || 'llama-3.3-70b-versatile';
+
+    // 1. Personality Engine: Retrieve detailed, anonymized character profile
+    const speakerProfile = PersonalityEngine.getProfile(speaker.id);
+    if (!speakerProfile) {
+      return NextResponse.json(
+        { error: 'INVALID_SPEAKER', message: `Speaker ID ${speaker.id} not found.` },
+        { status: 400 }
+      );
+    }
+    const anonymizedBrief = PersonalityEngine.getAnonymizedProfilePrompt(speakerProfile);
+
+    // 2. Topic Engine: Perform/retrieve topic breakdown & subtopic assignment
+    // Use the participant IDs from request body, fallback to history or current speaker if selectedIds is empty
+    const participants = selectedIds.length > 0 ? selectedIds : Array.from(new Set([speaker.id, ...history.map((m: any) => m.personaId)]));
+    const topicAnalysis = await TopicEngine.getOrAnalyzeTopic(topic, participants, apiKey, modelName);
+    const activeSubtopic = TopicEngine.getActiveSubtopic(topicAnalysis, speaker.id, history);
 
     // Map stances to user-friendly titles
     let stanceLabel = 'Neutral';
@@ -41,94 +105,111 @@ export async function POST(req: NextRequest) {
       stanceDetail = sideB?.description || 'Oppose the main topic.';
     }
 
-    // Format debate history — most recent 6 messages in chronological order
-    const historyText = history.length > 0
-      ? history
-        .slice(-6)
-        .reverse()
-        .map((m: any) => `[${m.personaName} (${m.stance.toUpperCase()})]: ${m.argument}`)
-        .join('\n\n')
-      : 'No previous arguments. You are making the opening statement.';
+    // 3. Memory Engine: Formulate used concept & repetition constraints
+    const memoryConstraints = MemoryEngine.extractMemoryConstraints(history, speaker.id, speaker.name);
 
-    // Construct the Gemini prompt — avoid repeating the topic in every response
-    const prompt = `You are participating in a structured live debate. Generate the next argument for your assigned side.
+    // 4. Conversation Engine: Flow control, debate styles, stages, and emotion parameters
+    const turnParams = ConversationEngine.determineTurnParams(history, speaker.id);
 
-Debate Topic: "${topic}"
+    // 5. Prompt Engine: Dynamic stitching of system and user prompts
+    const systemPrompt = PromptEngine.buildSystemPrompt(
+      anonymizedBrief,
+      stanceLabel,
+      stanceDetail,
+      topic,
+      activeSubtopic,
+      memoryConstraints,
+      turnParams
+    );
 
-Sides:
-- Side A: "${sideA?.title || 'Pro'}" — ${sideA?.description || ''}
-- Side B: "${sideB?.title || 'Con'}" — ${sideB?.description || ''}
-- Neutral: ${neutralStance?.description || 'Balanced view.'}
+    const userPrompt = PromptEngine.buildUserPrompt(
+      turnParams.opponentLastMessage,
+      turnParams,
+      activeSubtopic
+    );
 
-Your Persona: ${speaker.name} | Tone: ${speaker.tone}
-Your Position: ${stanceLabel}
-Your Goal: ${stanceDetail}
+    // Build anonymized chat history message stack for Groq API call
+    // Generic labels are used to prevent leaking raw names to the LLM
+    const apiMessages: any[] = [
+      { role: 'system', content: systemPrompt }
+    ];
 
-RULES (follow strictly):
-1. Write your argument directly — no meta commentary like "As ${speaker.name}..." or "Here is my argument".
-2. Stay in character: use your persona's tone and style.
-3. Engage with what previous speakers said — agree, dispute, or refine specific points they made.
-4. Do NOT restate the debate topic in your argument — it is already established.
-5. Keep it concise: 2–4 sentences, punchy and persuasive.
-6. English only.
+    // Format sorted history oldest-to-newest
+    const sortedHistory = [...history].reverse();
+    for (const msg of sortedHistory) {
+      // Find history msg speaker's stance
+      const msgSpeakerSide = personaSides[msg.personaId] || msg.stance || 'neutral';
+      let sideLabel = 'Neutral_Speaker';
+      if (msgSpeakerSide === 'for') sideLabel = 'Side_A_Speaker';
+      if (msgSpeakerSide === 'against') sideLabel = 'Side_B_Speaker';
 
-Recent Debate History:
-${historyText}
+      if (msg.personaId === speaker.id) {
+        apiMessages.push({
+          role: 'assistant',
+          content: msg.argument
+        });
+      } else {
+        apiMessages.push({
+          role: 'user',
+          name: sideLabel,
+          content: msg.argument
+        });
+      }
+    }
 
-[${speaker.name}]:`;
+    // Append final prompt
+    apiMessages.push({
+      role: 'user',
+      content: userPrompt
+    });
 
-    // Call Gemini API
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`; const apiResponse = await fetch(geminiUrl, {
+    console.log(`[API] Agent: ${speaker.name} | Subtopic: ${activeSubtopic} | Style: ${turnParams.style} | Stage: ${turnParams.stage}`);
+
+    // Call Groq API
+    const apiResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: prompt
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.75,
-          maxOutputTokens: 220,
-        }
+        model: modelName,
+        messages: apiMessages,
+        temperature: 0.8,
+        max_tokens: 120,
       })
     });
 
     if (!apiResponse.ok) {
-      const errorData = await apiResponse.json();
-      console.error('Gemini API returned error:', errorData);
+      const errorText = await apiResponse.text();
+      console.error('Groq API error:', apiResponse.status, errorText);
       return NextResponse.json(
-        { error: 'GEMINI_API_ERROR', message: errorData?.error?.message || 'Failed to call Gemini API.' },
+        { error: 'GROQ_API_ERROR', status: apiResponse.status, message: errorText },
+        { status: apiResponse.status }
+      );
+    }
+
+    const responseData = await apiResponse.json();
+    const rawArgument = responseData.choices?.[0]?.message?.content?.trim() || '';
+
+    if (!rawArgument) {
+      return NextResponse.json(
+        { error: 'EMPTY_RESPONSE', message: 'Groq returned an empty response.' },
         { status: 502 }
       );
     }
 
-    const data = await apiResponse.json();
-    const argumentText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-
-    if (!argumentText) {
-      return NextResponse.json(
-        { error: 'EMPTY_RESPONSE', message: 'Gemini returned an empty response.' },
-        { status: 502 }
-      );
-    }
-
-    // Clean up surrounding quotes if present
-    const cleanedArgumentText = argumentText.replace(/^[\"']|[\"']$/g, '');
+    const cleanedArgument = sanitizeResponse(rawArgument);
 
     return NextResponse.json({
-      argument: cleanedArgumentText,
-      stance: speaker.side
+      argument: cleanedArgument,
+      stance: speaker.side,
+      subtopic: activeSubtopic,
+      style: turnParams.style
     });
 
   } catch (error: any) {
-    console.error('Error in debate API route:', error);
+    console.error('Error in API route:', error);
     return NextResponse.json(
       { error: 'INTERNAL_SERVER_ERROR', message: error?.message || 'An unexpected error occurred.' },
       { status: 500 }

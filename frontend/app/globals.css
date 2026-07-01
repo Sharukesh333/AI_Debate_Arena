@@ -854,22 +854,115 @@ textarea.input-premium {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+.fade-in-up {
+  animation: fade-in-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Smooth entrance for page-level sections */
+.animate-fade-in {
+  animation: fade-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Animated message entry */
+.animate-msg-in {
+  animation: fade-in-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes pulse-border {
+  0%, 100% {
+    border-color: rgba(16, 185, 129, 0.3);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.1);
+  }
+  50% {
+    border-color: rgba(16, 185, 129, 0.8);
+    box-shadow: 0 0 24px rgba(16, 185, 129, 0.25);
+  }
+}
+
+/* ============================================
+   TYPING INDICATOR (3 bouncing dots)
+   ============================================ */
+.typing-loader {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.typing-loader span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  animation: typing-bounce 1.2s ease-in-out infinite;
+  display: block;
+}
+
+.typing-loader span:nth-child(1) { animation-delay: 0s; }
+.typing-loader span:nth-child(2) { animation-delay: 0.18s; }
+.typing-loader span:nth-child(3) { animation-delay: 0.36s; }
+
+@keyframes typing-bounce {
+  0%, 100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  45% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+/* Bounce for microphone emoji */
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-10px); }
+}
+
 /* ============================================
    RESPONSIVE
    ============================================ */
+
+/* Tablet */
+@media (max-width: 960px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-container {
+    max-height: 420px;
+  }
+}
+
+/* Mobile */
 @media (max-width: 640px) {
   .page-shell {
-    width: calc(100% - 2rem);
-    padding: 1.25rem 0 5rem;
+    width: calc(100% - 1.5rem);
+    padding: 1rem 0 4rem;
   }
 
   .glass-panel {
-    padding: 1.25rem;
+    padding: 1.25rem 1rem;
     border-radius: var(--radius-xl);
   }
 
   .navbar {
-    padding: 0.875rem 1.125rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .brand-logo {
+    font-size: 1.05rem;
   }
 
   .chat-bubble {
@@ -877,11 +970,50 @@ textarea.input-premium {
   }
 
   .stance-neutral .chat-bubble {
-    width: 95%;
-    max-width: 95%;
+    width: 96%;
+    max-width: 96%;
   }
 
   .hero-title-section h1 {
-    font-size: 1.625rem;
+    font-size: 1.5rem;
+  }
+
+  .hero-desc {
+    font-size: 0.875rem;
+  }
+
+  .chat-container {
+    max-height: 380px;
+    padding: 0.875rem;
+  }
+
+  .score-card-item {
+    padding: 0.75rem;
+  }
+
+  .score-digits {
+    font-size: 1.2rem;
+  }
+
+  /* Stack the play/pause btn group vertically on tiny screens */
+  .btn-group {
+    flex-wrap: wrap;
+  }
+
+  /* Persona selector single column on mobile */
+  .persona-selector-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Very small screens */
+@media (max-width: 400px) {
+  .bubble-header {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .bubble-time {
+    display: none;
   }
 }
