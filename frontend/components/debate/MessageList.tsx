@@ -21,12 +21,15 @@ export const MessageList: React.FC<MessageListProps> = ({
   currentSpeakerId = null,
   personaSides = {},
 }) => {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom whenever messages list grows or generation status changes
+  // Auto-scroll inside the chat container to bottom whenever messages list grows or generation status changes
   useEffect(() => {
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (containerRef.current) {
+      containerRef.current.scrollTo({
+        top: containerRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
     }
   }, [messages.length, isGeneratingNext]);
 
@@ -36,19 +39,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   const chronologicalMessages = [...messages].reverse();
 
   return (
-    <div className="chat-container" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '1rem',
-      overflowY: 'auto',
-      maxHeight: '520px',
-      padding: '1.25rem',
-      borderRadius: 'var(--radius-lg)',
-      backgroundColor: 'var(--bg-base)',
-      border: '1px solid var(--border-default)',
-      scrollBehavior: 'smooth',
-      minHeight: '280px',
-    }}>
+    <div className="chat-container" ref={containerRef}>
       {messages.length === 0 && !isGeneratingNext ? (
         <div style={{
           color: 'var(--text-secondary)',
@@ -281,7 +272,6 @@ export const MessageList: React.FC<MessageListProps> = ({
           })()}
         </>
       )}
-      <div ref={bottomRef} />
     </div>
   );
 };
