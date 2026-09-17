@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const modelName = process.env.GROQ_MODEL?.trim() || 'llama-3.3-70b-versatile';
+    const modelName = process.env.GROQ_MODEL?.trim() || 'groq/compound';
 
     // 1. Personality Engine: Retrieve detailed, anonymized character profile
     const speakerProfile = PersonalityEngine.getProfile(speaker.id);

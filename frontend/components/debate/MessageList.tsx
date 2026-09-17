@@ -211,7 +211,6 @@ export const MessageList: React.FC<MessageListProps> = ({
                 <div
                   className="chat-bubble"
                   style={{
-                    maxWidth: '85%',
                     width: 'fit-content',
                     backgroundColor: stance === 'for' ? 'var(--side-a-glow)' : stance === 'against' ? 'var(--side-b-glow)' : 'var(--side-neutral-glow)',
                     border: `1px solid ${stance === 'for' ? 'var(--side-a)' : stance === 'against' ? 'var(--side-b)' : 'var(--side-neutral)'}30`,
